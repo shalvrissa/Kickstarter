@@ -1,0 +1,455 @@
+---
+title: Determination of Kickstarter Campaign Success, and whether Crowdfunding would
+  be a successful Endeavor.
+author: "Sha Lu"
+date: "12/2/2021"
+output:
+  word_document: default
+  pdf_document:
+    extra_dependencies: subfig
+fontsize: 12pt
+geometry: margin=1in
+header-includes:
+- \usepackage{setspace}\doublespacing
+- \usepackage{float}
+fig_caption: yes
+indent: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+library(kknn)
+library(mosaic)
+library(ggthemes)
+library(gridExtra)
+library(car)
+library(performanceEstimation)
+library(InformationValue)
+library(pROC)
+library(e1071)
+library(rpart)
+library(dummies)
+library(class)
+library(rpart)
+library(rpart.plot)
+
+kick <- read_csv("Kickstarter.csv", col_types = "ncfffccnncccnnfnnffn")
+
+#Recode values for status to 1/0.
+kick <- kick %>%
+  mutate(status = as.factor(if_else(status == "successful",1,0)))
+```
+
+\pagebreak
+
+## 1. Introduction
+
+
+  Crowdfunding has been an area of interest in business. Typically, when launching a new product or service, the question of capital always comes up. Where will the money to launch the business come from? Shows like Shark Tank come to mind in which an average person places their dreams in front of successful investors in the hopes that one of them picks up their business, however, such opportunities are far from realistic and are not available readily. This is where crowdfunding comes in. 
+  
+  In crowdfunding, the general public are the investors. No longer are small business owners trying to pander to the hungry sharks but instead they talk directly to the people. People become the investors and directly donate however much capital they are willing to part with into the project to bring the product or service to light. This approach seems more approachable as “the process of founding and launching a crowdfunding campaign is less time intensive than other options, as no legal applications or approval procedures are involved” [1]. While crowd funding does sound romantic in theory, there is much to consider developing a business through public interest. How does one go about creating a crowdfunding endeavor and what variables come into place when determining its success? 
+  
+  Kickstarter is arguably the most prominent crowd funding platform to date. There are approximately 200,000+ successfully launched Kickstarter projects since February 2015, and the number continues to grow. Despite having a growing number of successful projects, there are a vast majority of projects that also fail. The current projection is that only 40% of all Kickstarter projects become successful. The risk of failure is incredibly high. In a study by Koch and Siering, they concluded that the factors that most contribute to success on the platform are funding goal and duration. Jascha Koch and Qian Cheng studied the role of qualitative success factors in the analysis of crowdfunding success. They surmised that qualitative factors are just as important as the quantitative ones. They found that the more polished the project, the greater the chances of success. “The inclusion of only quantitative factors as an approximation for underlying qualitative attributes was a good approach,” in determining success of the crowd funding campaign [2]. 
+
+_1.1 Research Question_
+
+  Which variables are the best at determining Kickstarter success? The current study builds prediction models using Logistic Regression, KNN, Catagorical Tree and Random Forest to predict the success of a Kickstarter campaign. Through this project, I hope to create a model that is effective at predicting success rate of Kickstarter campaigns to allow us to determine if Kickstarter would be an effective crowdfunding platform. 
+
+_1.2 Data_
+
+  For this study, the data set was obtained from Kaggle [3]. The data set contains total 192548 records with the following 20 variables (Outcome variable - _status_):
+
+* **Categorical variables**
+  + *id:* Unique identification number (primary key).
+  + *name:* Name of the project.
+  + *currency:* USD, GBP, EUR etc.
+  + *main_category:* games, comics, fashion etc. This is one of the predictors used in the models.
+  + *sub_category*
+  + *city* 
+  + *state* 
+  + *country*
+  + *status:* 1 = success, 0 = failure. This is our outcome variable.
+  + *start_month* 
+  + *end_month* 
+  + *start_Q:* Quarter for the start of the campaign.
+  + *end_Q:* Quarter when the campaign ended. 
+* **Quantitative variables**
+  + *launched_at:* Date of launch of campaign to raise a certain amount of money.
+  + *deadline:* Deadline for the campaign.
+  + *duration:* The duration in days for the campaign to raise money through crowdfunding. This is a predictor used in the models. 
+  + *goal_usd:* The total amount of money required to be raised. This is another predictor.
+  + *blurb_length*
+  + *name_length:* This is a predictor.
+  + *usd_pledged*
+
+  The data set include both categorical and quantitative variables. The categorical variables I am using in the model will be main_category, status. Status is the dependent variable, denoting if the project was a success or failure. I have converted this variable to be binary, 1 = success and 0 = failure.
+  
+  Quantitative variables I will use in the model are duration, goal_usd, and name_length. Duration will tell us how long the project remained on Kickstarter, while goal_usd will tell us what was the monetary amount that the campaign aimed to raise. The name_length, tell us how long the description and name of the project was. 
+
+
+_1.3 Method_
+
+  I plan on using decision trees, logistic regression, and KNN to determine Kickstarter success. I would set the status variable as the dependent variable as this binary variable tells us if the campaign was a success or not. Since creating 3 different models, I will have to check the accuracy and error rates to determine which model is the best for predicting success of a Kickstarter campaign. Due to the nature of Kickstarter, I may encounter some outliers within the data, as well as specific variables have high numerical values. To remedy this, I will scale the quantitative data to allow for better modeling, and possibly transform some variables to reduce the outlier effect. 
+  
+  
+\singlespacing
+
+## 2. Exploratory Data Analysis
+
+  There are no missing values in the data set. For the continuous variables, the box plots show their distributions. The variable goal_usd is highly right skewed, so, a log transformation is needed. Other variables look fine.
+
+```{r eda, out.height="35%", fig.align='center'}
+#Select the variables of interest
+kick <- kick %>%
+  select(id, main_category, duration, goal_usd, name_length, status)
+
+#Get quick summary of the dataset
+kick %>%
+  summary()
+
+#Boxplot for continuous variables (showing the outliers and skewness)
+kick %>%
+  select(duration, name_length) %>%
+  as.data.frame() %>%
+  stack() %>%
+  ggplot() + 
+  geom_boxplot(aes(y = ind, x = values)) + theme_bw()
+
+kick %>%
+  ggplot() + geom_boxplot(aes((goal_usd))) +
+  geom_boxplot(aes((duration))) +
+  theme_bw()
+
+kick %>%
+  ggplot() + geom_boxplot(aes(log(goal_usd))) +
+  theme_bw()
+```
+Distribution of the success category
+ 
+```{r}
+kick %>%
+  group_by(main_category) %>%
+  mutate(count = n()) %>%
+  filter(status == 1) %>%
+  mutate(success = n()) %>%
+  ungroup() %>%
+  mutate(success_perc = success/count) %>%
+  select(main_category, success_perc) %>%
+  unique() -> kick_freq
+
+kick_freq %>%
+  ggplot(aes(y = main_category, x = success_perc)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Success proportion", y = "Main category") +
+  theme_bw()
+
+```
+
+
+## 3. Binomial Logistic Regression Model
+
+### Assumptions
+
+1. Binary logistic regression requires the dependent variable to be binary.
+2. The observations are independent of each other.
+3. There is no severe multicollinearity among the explanatory variables.
+4. There are no extreme outliers.
+5. The independent variables are linearly related to the log odds.
+6. The sample size of the dataset is large enough to draw valid conclusions from the fitted logistic regression model.
+
+Out of the above 5 assumptions, the 3rd assumption about multicollinearity will be tested using variance inflation factor (VIF). The outliers from will be removerd for the 4th assumption. There is no evidence to suggest that the remaining 4 assumptions are violated.
+
+### Dealing with Outliers
+
+  
+  There seems to be many outliers/extreme values. For the sake of this analysis, these extreme values/potential outliers will be remved and focus on the more numerous values in the middle section of the distribution. After removing the extreme values, there are over 130k observations left. Finally, draw a random sample of 10000 records to do the analysis.
+
+```{r}
+#Remove outliers or extreme values
+kick %>%
+  filter(12>log(goal_usd), 4<log(goal_usd)) %>%
+  filter(20<duration, 40>duration) %>%
+  filter(name_length<15) ->
+  kick
+
+set.seed(12345)
+sample_10k <- sample(nrow(kick), 10000, replace = FALSE)
+kick <- kick[sample_10k, ]
+```
+
+### Splitting the Data
+
+We partition our data into training and test data sets.
+
+```{r}
+set.seed(12345)
+
+kick_split <- initial_split(kick)
+
+kick_train <- training(kick_split)
+kick_test <- testing(kick_split)
+```
+
+
+### Fitting the Model
+
+
+We see that based on the p-values, category of music, design, publishing, and theater are not significant. But all of the features in this full model are significant.
+
+Among the category, comics and dance would increase the likelihood of being success. Name_length has a positive effect but project duration and usd_goal both have the negative effects on whether the crowdfunding would succeed. The reference category is game.
+
+```{r}
+lr_spec <- logistic_reg() %>%
+  set_engine("glm") %>%
+  set_mode("classification")
+
+kick_model <- lr_spec %>%
+  fit(status ~ ., data = kick_train)
+
+kick_model %>% 
+  extract_fit_engine() %>%
+  summary()
+```
+
+```{r}
+# See the Odds
+tidy(kick_model, exponentiate = TRUE)
+```
+
+### Dealing with Multicollinearity
+
+
+Multicollinearity is a problem because it makes it difficult to separate out the impact of individual predictors on response. A VIF of greater than 5 indicates the presence of multicollinearity and requires remediation. Our results show that none of the features have a VIF larger than 5.
+
+```{r}
+kick_model %>% 
+  extract_fit_engine() %>%
+  vif()
+```
+
+### Prediction Accuracy
+
+
+The confusion matrix and the model accuracy test show that logistic regression model's predictive accuracy is 68.4%.
+
+```{r}
+augment(kick_model, kick_train) %>%
+  conf_mat(truth = status, estimate = .pred_class)
+
+augment(kick_model, kick_train) %>%
+  conf_mat(truth = status, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+
+augment(kick_model, kick_train) %>%
+  accuracy(truth = status, estimate = .pred_class)
+```
+
+## 4. K-Nearest Neighbors
+
+### Normalizing the Data
+
+
+  Features with larger values or that have a wider range of values tend to disproportionately impact Euclidean distances. Hence, it is vital to normalize the feature values prior to KNN. I will use the min-max normalization approach. Then it will be applied to each of the numerical features to normalize their values between 0 and 1.
+
+```{r}
+normalize <- function(x) {
+  return((x - min(x))/(max(x)-min(x)))
+}
+
+kick.normal <- kick %>%
+  mutate(duration = normalize(duration)) %>%
+  mutate(goal_usd = normalize(goal_usd)) %>%
+  mutate(name_length = normalize(name_length))
+```
+
+### Dealing with Categorical Variables
+
+
+  A common approach to deal with categorical variables is to code them as dummy variables. Conveniently, the values for these new features also fall within the same scale (0 and 1) as the normalized features earlier. 
+
+Our new feature names list shows that we now have 19 features, 15 of which are our newly created dummy variables. One of the features - id is the primary key and not a predictor. 
+
+```{r}
+kick.normal <- data.frame(kick.normal)
+
+#Split off the class labels
+kick.normal.labels <- kick.normal %>%
+  select(status)
+kick.normal <- kick.normal %>%
+  select(-status)
+
+#Create dummy variables
+kick.normal <- dummy.data.frame(data = kick.normal, sep = "_")
+colnames(kick.normal)
+```
+
+### Fitting and Evaluating
+
+Results show that KNN model's predictive accuracy is ~89%.
+
+```{r}
+knn5_spec <- nearest_neighbor(neighbors = 5) %>%
+  set_mode("classification") %>%
+  set_engine("kknn")
+
+knn5_fit <- knn5_spec %>% 
+  fit(formula = status ~ ., data = kick_train)
+
+knn5_fit %>%
+  augment(kick_train) %>% 
+  conf_mat(truth = status, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+
+augment(knn5_fit, kick_train) %>%
+  accuracy(truth = status, estimate = .pred_class)
+```
+### Test Knn
+
+The model is tested in the test set. Accuracy is ~88.52%.
+
+```{r}
+knn5_fittest <- knn5_spec %>% 
+  fit(formula = status ~ ., data = kick_test)
+
+knn5_fittest %>%
+  augment(kick_test) %>% 
+  conf_mat(truth = status, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+
+augment(knn5_fittest, kick_test) %>%
+  accuracy(truth = status, estimate = .pred_class)
+```
+
+Setting k = 87 ( k = square root of number of training observations) to see if the model improved. And it is not. 
+
+```{r}
+knn87_spec <- nearest_neighbor(neighbors = 87) %>%
+  set_mode("classification") %>%
+  set_engine("kknn")
+
+knn87_fit <- knn87_spec %>% 
+  fit(formula = status ~ ., data = kick_train)
+
+knn87_fit %>%
+  augment(kick_train) %>% 
+  conf_mat(truth = status, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+
+augment(knn87_fit, kick_train) %>%
+  accuracy(truth = status, estimate = .pred_class)
+```
+Sensitivity: TP/(All P or TP + FN) = 4486/(4486+262) = 94.4%
+Specificity: TN/(All N or TN + FP) = 558/(2194+558) = 20.2%
+
+
+
+## 5. Decision Tree
+
+### Training the Model
+
+```{r}
+tree_spec <- decision_tree() %>%
+  set_mode("classification") %>%
+  set_engine("rpart")
+
+tree_spec %>% 
+  translate()
+
+kick_tree <- fit(tree_spec, status ~ ., data = kick_train)
+
+kick_tree %>% 
+  extract_fit_engine() %>% 
+  summary()
+
+kick_tree %>%
+  extract_fit_engine() %>%
+  rpart.plot::rpart.plot()
+```
+
+### Evaluating the Model
+
+We create a confusion matrix based on our predictions and calculate the prediction accuracy of our model, which comes out to be 68.36%.
+
+```{r}
+kick_tree %>%
+  augment(new_data = kick_train) %>%
+  conf_mat(status, .pred_class) %>%
+  autoplot(type = "heatmap")
+
+kick_tree %>%
+  augment(new_data = kick_train) %>%
+  accuracy(status, .pred_class)
+```
+
+### Including more catagory and evaluating 
+
+It improved the tree accuracy by 1%.
+
+```{r}
+kick_tree01 <- tree_spec %>%
+  set_args(cost_complexity = 0.005) %>% 
+  # decrease the complexity we will get a much more complicated tree
+  fit(status ~ ., data = kick_train)
+
+kick_tree01 %>%
+  extract_fit_engine() %>%
+  rpart.plot::rpart.plot()
+
+kick_tree01 %>%
+  augment(new_data = kick_train) %>%
+  conf_mat(status, .pred_class) %>%
+  autoplot(type = "heatmap")
+
+kick_tree01 %>%
+  augment(new_data = kick_train) %>%
+  accuracy(status, .pred_class)
+```
+
+### Random Forest and evaluation 
+
+The accuracy for the model is 85.5%.
+
+```{r}
+rf_spec <- rand_forest(trees = 100) %>%
+  set_mode("classification") %>%
+  set_engine("ranger", importance = "impurity")
+
+kick_train2 <- kick_train %>% select(-id)
+rf_fit <- fit(rf_spec, status ~ ., data = kick_train2)
+rf_fit
+
+rf_fit %>%
+  augment(new_data = kick_train2) %>%
+  accuracy(status, .pred_class)
+
+rf_fit %>%
+  augment(new_data = kick_train2) %>%
+  conf_mat(status, .pred_class) %>% 
+  autoplot(type = "heatmap")
+```
+
+Visualizing the variable importance in this model. As we can see, the goal for the project is of the most importance to determine if the crowdfunding on Kickstart would succeed.
+ 
+```{r}
+vip::vip(rf_fit)
+vip::vi(rf_fit)
+```
+
+
+\doublespacing
+\pagebreak
+## 6. Conclusion
+
+   Based on the initial models we found that KNN with K = 5 provided the best accuracy with nearly 90% accuracy, followed by the random forest with the accuracy rate at 85%. Goal_usd and Campaign Category was the most significant among all the variables. Main Category of Dance generally performed the best. However, the KNN model has very high sensitivity (94.4%) which would lead to the type 2 error. So we would think the random forest model is the best one here.
+   What we can get from the results is that if the project falls into the category of technology, journalism, crafts, photography and food, the chance of getting succeed is immediately dropping down to less than 30%. Other than these category mentioned above, if the goal of the crowdfunding is less than 22,000 USD, the chance to get the funding is the highest, which is around 66%. We can get this conclusion from both logistic regression and decision tree. the category of technology, journalism, crafts, photography and food have the top negative coefficient and the decision tree is intuitive to show this result. 
+   Because of the time length of this project is limited, it has to stop here at this stage. There are some more things we could do for the future research: we could include more variables to check if there are other factors that matter to the Kickstart crowdfunding platforam. We could also gather data form other crowedfunding platform to compare which one has the best chance to get the funding. Furthermore we could test the sensitivity and specificity for other models to determine the best model.  
+
+
+
+## 7. References
+\footnotesize
+1. Brown, Terrence E., et al. “Seeking Funding in Order to Sell: Crowdfunding as a Marketing Tool.” Business Horizons, vol. 60, no. 2, Mar. 2017, pp. 189–195, 10.1016/j.bushor.2016.11.004. [Accessed 26 Oct. 2021]
+2. Koch, Jascha-Alexander, and Qian Cheng. THE ROLE of QUALITATIVE SUCCESS FACTORS in the ANALYSIS of CROWDFUNDING SUCCESS: EVIDENCE from KICKSTARTER. 2016.
+3. https://www.kaggle.com/yashkantharia/kickstarter-campaigns?select=Kickstarter_projects_Feb19.csv
